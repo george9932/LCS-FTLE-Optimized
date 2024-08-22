@@ -141,6 +141,13 @@ class FlowField
                 case Backward: current_time_ -= delta_; break;
                 default: break;
             }
+
+            std::stringstream ss;
+            ss << std::fixed << std::setprecision(12) << current_time_;
+            if (ss.str() ==  "-0.000000000000" || ss.str() ==  "0.000000000000") {
+                current_time_ = 0.0;
+            }
+
             current_pos_->UpdateTime(current_time_);
             current_vel_->UpdateTime(current_time_);
         }
@@ -148,8 +155,14 @@ class FlowField
         /** Update time of the flow field using the provided time.
             @param time New time for the flow field.
             */
-        inline void UpdateTime(const T time)
+        inline void UpdateTime(T time)
         {
+            std::stringstream ss;
+            ss << std::fixed << std::setprecision(12) << time;
+            if (ss.str() ==  "-0.000000000000" || ss.str() ==  "0.000000000000") {
+                time = 0.0;
+            }
+
             current_time_ = time;
             current_pos_->UpdateTime(current_time_);
             if (current_vel_ != nullptr) current_vel_->UpdateTime(current_time_);
@@ -158,26 +171,10 @@ class FlowField
         /** Particle advection (calculating particle trajectories).  */
         void Run()
         {
-            switch(direction_)
-            {
-                case Forward:
-                    std::cout << "Particle forward advection begins" << std::endl;
-                    break;
-                case Backward:
-                    std::cout << "Particle backward advection begins" << std::endl;
-                    break;
-                default: break;
-            }
-            CopyInitialPositionToCurrentPosition();
-
             Clock clock;
             for (unsigned i = 0; i < step_; ++i)
             {
                 clock.Begin();
-                std::stringstream ss;
-                ss << "[" << std::setw(std::to_string(step_).length()) << (i+1)
-                    << "/" << step_ << "]" <<
-                    " Simulation time: " << current_time_;
 
                 SetCurrentVelocity();
 
@@ -189,23 +186,6 @@ class FlowField
                 }
 
                 UpdateTime();
-
-                ss << " - " << current_time_;
-                clock.End();
-                ss << " (Execution time: " <<
-                    std::setprecision(4) << clock.GetTotalElapsedTime() <<
-                    "s)" << std::endl;
-                std::cout << ss.str();
-            }
-            switch(direction_)
-            {
-                case Forward:
-                    std::cout << "Particle forward advection ends" << std::endl;
-                    break;
-                case Backward:
-                    std::cout << "Particle backward advection ends" << std::endl;
-                    break;
-                default: break;
             }
         }
 
@@ -239,7 +219,7 @@ class DiscreteFlowField : public FlowField<T, Dim>
             @param data_ny The number of grid points in \f$y\f$-direction in the input flow data.
             */
         DiscreteFlowField(unsigned nx, unsigned ny, unsigned data_nx, unsigned data_ny):
-            FlowField<T, Dim>(nx, ny), data_nx_(data_nx), data_ny_(data_ny),
+            FlowField<T, Dim>(nx, ny), data_nx_(data_nx), data_ny_(data_ny), precision_(),
             data_delta_(), current_data_time_(), begin_data_time_(), end_data_time_(),
             vel_file_name_prefix_(""), vel_file_name_suffix_(".txt"),
             data_pos_(new Position<T,Dim>(data_nx, data_ny)),
@@ -253,6 +233,14 @@ class DiscreteFlowField : public FlowField<T, Dim>
             */
         DiscreteFlowField(unsigned nx, unsigned ny):
             DiscreteFlowField(nx, ny, nx, ny) {}
+
+        /** Set the precision of the floats for read/write processes.
+            @param precision Precision for read/write processes.
+            */
+        inline void SetPrecision(const T precision)
+        {
+            precision_ = precision;
+        }
 
         /** Set the prefix of the file names of the input velocity data.
             @param prefix A string contains the prefix of file names.
@@ -275,14 +263,28 @@ class DiscreteFlowField : public FlowField<T, Dim>
             */
         inline void ReadDataVelocityFromFile(Velocity<T, Dim>& data_vel)
         {
-            std::string file_name = vel_file_name_prefix_ +
-                std::to_string(static_cast<int>(data_vel.GetTime())) + 
-                vel_file_name_suffix_;
+            std::stringstream ss;
+            ss << std::fixed << std::setprecision(precision_) << static_cast<float>(data_vel.GetTime());
+            std::string s;
+            if (precision_ == 0) {
+                s = "-0";
+            } else {
+                s = "-0.";
+                for (int i = 0; i < precision_; ++i) {
+                    s += "0";
+                }   
+            }
+            if (ss.str() == s) {
+                data_vel.UpdateTime(0);
+            }
 
-            data_vel.ReadFromFile(file_name);
+            std::stringstream file_name;
+            file_name << 
+            vel_file_name_prefix_ << 
+            std::fixed << std::setprecision(precision_) << 
+            static_cast<float>(data_vel.GetTime()) << vel_file_name_suffix_; 
 
-            std::cout << "Read velocity data at time = " <<
-                data_vel.GetTime() << " from " << file_name << std::endl;
+            data_vel.ReadFromFile(file_name.str());
         }
 
         /** Calculate and set the current velocities of the flow particles from temporal and spatical interpolations of the velocity data.
@@ -364,7 +366,7 @@ class DiscreteFlowField : public FlowField<T, Dim>
                     this->current_time_, *current_data_vel_);
 
             // spatial interpolation
-            this->current_vel_->InterpolateFrom(*current_data_vel_);
+            this->current_vel_->InterpolateFrom(*current_data_vel_); 
 
         }
 
@@ -448,6 +450,7 @@ class DiscreteFlowField : public FlowField<T, Dim>
     private:
         const unsigned data_nx_; /**<The number of grid points in \f$x\f$-direction in the input flow data.*/
         const unsigned data_ny_; /**<The number of grid points in \f$y\f$-direction in the input flow data.*/
+        T precision_; /**<The precision of the floats for read/write processes.*/
         T data_delta_; /**<Time difference between two adjacent data files.*/
         T current_data_time_;/**<Time of the currently used velocity data file.*/
         T begin_data_time_;/**<Time of the data file that is used at the beginning of calculation.*/

@@ -47,22 +47,9 @@ class FTLE : public Field<T, Dim, 1>
         /** Calculate FTLE field from the flow map that is obtained from the flow field. OpenMP is used for calculation.*/
         void Calculate()
         {
-            Clock clock;
-            clock.Begin();
             auto initial_pos_data = flow_field_.InitialPosition().GetAll();
             auto current_pos_data = flow_field_.CurrentPosition().GetAll();
-            auto dt = this->time_ - initial_time_;
-
-            switch(flow_field_.GetDirection())
-            {
-                case Forward:
-                    std::cout << "Forward FTLE calculation begins" << std::endl;
-                    break;
-                case Backward:
-                    std::cout << "Backward FTLE calculation begins" << std::endl;
-                    break;
-                default: break;
-            }
+            auto dt = std::abs(this->time_ - initial_time_);
 
             #pragma omp parallel for
             for (unsigned i = 0; i < this->nx_; ++i)
@@ -89,20 +76,6 @@ class FTLE : public Field<T, Dim, 1>
                     this->data_(i,j).value = .5 * std::log(eivals.maxCoeff()) / dt;
                 }
             }
-
-            clock.End();
-            switch(flow_field_.GetDirection())
-            {
-                case Forward:
-                    std::cout << "Forward FTLE calculation ends";
-                    break;
-                case Backward:
-                    std::cout << "Backward FTLE calculation ends";
-                    break;
-                default: break;
-            }
-            std::cout << " (Execution time: " <<
-                std::setprecision(4) << clock.GetTotalElapsedTime() << "s)" << std::endl;
         }
 
     private:

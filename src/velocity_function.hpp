@@ -107,7 +107,7 @@ template <typename T>
 struct DoubleGyreModel
 {
     /** Constructor with default parameters. */
-    DoubleGyreModel(): epsilon_(0.1), a_(0.1), omega_(4*std::atan(1)/5) {}
+    DoubleGyreModel(): epsilon_(0.5), a_(0.1), omega_(4*std::atan(1)/40) {}
 
     /** Constructor with customized parameters.
         @param p A vector of parameters.
@@ -144,5 +144,62 @@ struct DoubleGyreModel
 };
 
 
+/** @brief Co-rotating double-gyre model
+    
+    The velocity function of the co-rotating double-gyre model is implemented here. The model consists of a pair of clockwise co-rotating gyres.
+
+    The velocity for a given point \f$(x,y)\f$ at time \f$t\f$ is given by
+    \f[
+        u = -\pi A\sin(\pi f)\cos(\pi y),
+    \f]
+    and
+    \f[
+        v = \pi A\cos(\pi f)\sin(\pi y)\frac{\partial f}{\partial x},
+    \f]
+    where \f$f(x,t)=ax^2+bx\f$, \f$a(t)=\epsilon\sin(\omega t)\f$ and \f$b(t)=1-2\epsilon\sin(\omega t)\f$.
+
+    @tparam T Numeric data type of the values.
+    */
+template <typename T>
+struct ClockwiseDoubleGyreModel
+{
+    /** Constructor with default parameters. */
+    ClockwiseDoubleGyreModel(): epsilon_(0.3), a_(0.1), omega_(4*std::atan(1)/40) {}
+
+    /** Constructor with customized parameters.
+        @param p A vector of parameters.
+        */
+    ClockwiseDoubleGyreModel(std::vector<T>& p)
+    {
+        assert(p.size() == 3);
+        epsilon_ = p[0]; a_ = p[1]; omega_ = p[2];
+    }
+
+    /** Get the velocity for a given point at a given time
+        @param x \f$x\f$-coordinate of the point.
+        @param y \f$y\f$-coordinate of the point.
+        @param t Time for velocity.
+        */
+    inline auto operator() (const T x, const T y, const T t) const
+    {
+        T at = epsilon_ * std::sin(omega_ * t);
+        T bt = 1 - 2 * epsilon_ * std::sin(omega_ * t);
+        T f = at*x*x + bt*x;
+        T dfdx = 2*at*x + bt;
+
+        T pi = 4 * std::atan(1);
+        T u = -pi * a_ * (1+std::sin(1.5*pi*f)) * std::cos(pi*y);
+        T v = 1.5 * pi * a_ * std::cos(1.5*pi*f) * std::sin(pi*y) * dfdx;
+
+        return std::make_tuple(u, v);
+    }
+
+    T epsilon_; /**<Parameter \f$\epsilon\f$ for the model.*/
+    T a_; /**<Parameter \f$A\f$ for the model.*/
+    T omega_; /**<Parameter \f$\omega\f$ for the model.*/
+
+};
+
 }
+
 }

@@ -7,28 +7,41 @@ ifeq ($(UNAME), Darwin)
 	CXX = g++-6
 endif
 
-CXXFLAGS = -g -Wall -O2 -std=c++14 -fopenmp
+CXXFLAGS = -g -Wall -O2 -std=c++17 -fopenmp
 
 INCLUDES = -I./include
 
-SRC1 = demo/double_gyre/continuous_double_gyre.cpp
-SRC2 = demo/double_gyre/discrete_double_gyre.cpp
+SRC = ./fast_computation/discrete_fast_lcs_computation.cpp
 
 BINDIR = ./bin
 
-TARGET1 = $(BINDIR)/demo_continuous_double_gyre
-TARGET2 = $(BINDIR)/demo_discrete_double_gyre
+TARGET = $(BINDIR)/DiscreteFastComputation
 
-all: $(TARGET1) $(TARGET2)
+OBJ = $(SRC:.cpp=.o)
 
-$(TARGET1): | $(BINDIR)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) $(SRC1) -o $(TARGET1)
+# Targets
+all: prepare_dirs $(TARGET)
 
-$(TARGET2): | $(BINDIR)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) $(SRC2) -o $(TARGET2)
+# Build target
+$(TARGET): $(OBJ) | $(BINDIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) $(OBJ) -o $(TARGET)
 
+# Object file rule
+$(OBJ): $(SRC)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $(SRC) -o $(OBJ)
+
+# Directory creation
 $(BINDIR):
 	mkdir -p $(BINDIR)
 
-clean:
-	rm -f $(TARGET1) $(TARGET2)
+# Create directories target
+prepare_dirs:
+	mkdir -p ./fast_computation/step_flow_maps
+	mkdir -p ./fast_computation/results/ftle
+
+# Clean target
+clean: prepare_dirs
+	rm -f $(TARGET) $(OBJ)
+
+# Phony targets
+.PHONY: all clean prepare_dirs

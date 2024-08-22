@@ -8,6 +8,11 @@
 
 #include "basic.hpp"
 #include <omp.h>
+#include <stdexcept>
+#include <cstring>
+#include <sys/mman.h>  
+#include <fcntl.h>     
+#include <unistd.h>    
 
 namespace LCS {
 
@@ -65,6 +70,14 @@ class Field
             FieldPolicy<T, Dim, Size>::ReadFromFile(*this, file_name);
         }
 
+        /** Read data from a memory-mapped file.
+            @param file_name Input data file name.
+            */
+        inline void ReadFromMemoryMappedFile(const std::string& file_name)
+        {
+            FieldPolicy<T, Dim, Size>::ReadFromMemoryMappedFile(*this, file_name);
+        }
+
         /** Set all data vlues of the Field with an existing Tensor.
             @param data Input Tensor.
             */
@@ -76,8 +89,14 @@ class Field
         /** Update the time associated with the Field.
             @param time New time for the Field.
             */
-        inline void UpdateTime(const T time)
+        inline void UpdateTime(T time)
         {
+            std::stringstream ss;
+            ss << std::fixed << std::setprecision(12) << time;
+            if (ss.str() ==  "-0.000000000000" || ss.str() ==  "0.000000000000") {
+                time = 0.0;
+            }
+
             time_ = time;
         }
 
@@ -87,6 +106,14 @@ class Field
         inline void WriteToFile(const std::string& file_name) const
         {
             FieldPolicy<T, Dim, Size>::WriteToFile(*this, file_name);
+        }
+
+        /** Write data to a memory-mapped file.
+            @param file_name Output data file name.
+            */
+        inline void WriteToMemoryMappedFile(const std::string& file_name) const
+        {
+            FieldPolicy<T, Dim, Size>::WriteToMemoryMappedFile(*this, file_name);
         }
 
         friend struct FieldPolicy<T, Dim, Size>;
@@ -122,11 +149,67 @@ struct FieldPolicy<T, 2, Size>
             throw std::runtime_error("file does not open correctly!");
     
         file.clear();
+        file << std::fixed << std::setprecision(17);
         file << field.nx_ << std::endl;
         file << field.ny_ << std::endl;
         file << field.time_ << std::endl;
         file << field.data_;
         file.close();
+    }
+
+    /** Write Field data to a memory-mapped file.
+        @param field Input field.
+        @param file_name Output data file name.
+        */
+    static inline void WriteToMemoryMappedFile(const Field<T, 2, Size>& field, const std::string& file_name) {
+        
+        int fd = open(file_name.c_str(), O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+        if (fd == -1) {
+            throw std::runtime_error("Could not open file for writing");
+        }
+
+        double grid_points = field.data_.GetAll().size();
+        size_t data_size = sizeof(T) * grid_points * Size;
+        size_t total_size = sizeof(field.nx_) + sizeof(field.ny_) + sizeof(field.time_) + data_size;
+        if (ftruncate(fd, total_size) == -1) {
+            close(fd);
+            throw std::runtime_error("Could not set file size");
+        }
+
+        void* map = mmap(nullptr, total_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+        if (map == MAP_FAILED) {
+            close(fd);
+            throw std::runtime_error("Memory mapping failed");
+        }
+
+        char* ptr = reinterpret_cast<char*>(map);
+        std::memcpy(ptr, &field.nx_, sizeof(field.nx_));
+        ptr += sizeof(field.nx_);
+        std::memcpy(ptr, &field.ny_, sizeof(field.ny_));
+        ptr += sizeof(field.ny_);
+        std::memcpy(ptr, &field.time_, sizeof(field.time_));
+        ptr += sizeof(field.time_);
+
+        auto temp_tensor = field.GetAll();
+        for (unsigned i = 0; i < field.nx_; ++i) {
+            for (unsigned j = 0; j < field.ny_; ++j) {
+                Vector<T, Size> v = temp_tensor.Get(i,j);
+                double vx = v.x;
+                double vy = v.y;
+                std::memcpy(ptr, &vx, sizeof(T));
+                ptr += sizeof(T);
+                std::memcpy(ptr, &vy, sizeof(T));
+                ptr += sizeof(T);
+            }
+        }
+
+        if (munmap(map, total_size) == -1) {
+            close(fd);
+            throw std::runtime_error("Could not unmap memory");
+        }
+        if (close(fd) == -1) {
+            throw std::runtime_error("Could not close file");
+        }
     }
     
     /** Read data form a file to Field.
@@ -153,6 +236,61 @@ struct FieldPolicy<T, 2, Size>
         file >> field.data_;
 
         file.close();
+    }
+
+    /** Read data from a memory-mapped file to Field.
+        @param field Field that needs to read the data.
+        @param file_name Input data file name.
+        */
+    static inline void ReadFromMemoryMappedFile(Field<T, 2, Size>& field, const std::string& file_name) {
+
+        int fd = open(file_name.c_str(), O_RDONLY);
+        if (fd == -1) {
+            throw std::runtime_error("Could not open file for reading");
+        }
+
+        double grid_points = field.data_.GetAll().size();
+        size_t data_size = sizeof(T) * grid_points * Size;
+        size_t total_size = sizeof(field.nx_) + sizeof(field.ny_) + sizeof(field.time_) + data_size;
+        void* map = mmap(nullptr, total_size, PROT_READ, MAP_SHARED, fd, 0);
+        if (map == MAP_FAILED) {
+            close(fd);
+            throw std::runtime_error("Memory mapping failed");
+        }
+
+        unsigned nx, ny;
+        char* ptr = reinterpret_cast<char*>(map);
+        std::memcpy(&nx, ptr, sizeof(nx));
+        ptr += sizeof(nx);
+        std::memcpy(&ny, ptr, sizeof(ny));
+        ptr += sizeof(ny);
+
+        // check if sizes match
+        if (field.nx_!=nx || field.ny_!=ny)
+            throw std::domain_error("sizes do not match!");
+
+        std::memcpy(&field.time_, ptr, sizeof(field.time_));
+        ptr += sizeof(field.time_);
+
+        std::vector<Vector<T, Size>> temp_vector(grid_points);
+        for (unsigned i = 0; i < grid_points; ++i) {
+            double vx, vy;
+            std::memcpy(&vx, ptr, sizeof(T));
+            ptr += sizeof(T);
+            std::memcpy(&vy, ptr, sizeof(T));
+            ptr += sizeof(T);
+            Vector<T, Size> v(vx,vy);
+            temp_vector[i] = v;
+        }
+        field.data_.SetAll(temp_vector);
+
+        if (munmap(map, total_size) == -1) {
+            close(fd);
+            throw std::runtime_error("Could not unmap memory");
+        }
+        if (close(fd) == -1) {
+            throw std::runtime_error("Could not close file");
+        }
     }
 
 };
@@ -260,6 +398,25 @@ class Position : public Field<T, Dim, Dim>
 
                     // check if the position is out of bound
                     // need to deal with NAN values
+                    if (out_of_bound_ != nullptr)
+                        if (this->data_(i,j).x < bound_xmin_ ||
+                                this->data_(i,j).x > bound_xmax_ ||
+                                this->data_(i,j).y < bound_ymin_ ||
+                                this->data_(i,j).y > bound_ymax_)
+                            out_of_bound_->SetValue(i, j, true);
+                }
+            }
+        }
+
+        /** Update the Tensor that contains out-of-bound information.
+            */
+        inline void UpdateOutOfBoundTensor()
+        {
+            #pragma omp parallel for
+            for (unsigned i = 0; i < this->nx_; ++i)
+            {
+                for (unsigned j = 0; j < this->ny_; ++j)
+                {
                     if (out_of_bound_ != nullptr)
                         if (this->data_(i,j).x < bound_xmin_ ||
                                 this->data_(i,j).x > bound_xmax_ ||
@@ -394,7 +551,7 @@ class Velocity : public Field<T, Dim, Dim>
                     std::tie(ref_v(0,1).x, ref_v(0,1).y) = ref_vel.Get(i_pre, j_next);
                     std::tie(ref_v(1,0).x, ref_v(1,0).y) = ref_vel.Get(i_next, j_pre);
                     std::tie(ref_v(1,1).x, ref_v(1,1).y) = ref_vel.Get(i_next, j_next);
-                    
+
                     auto vx1 = interpolate(ref_pos_x[i_pre], ref_pos_x[i_next],
                             ref_v(0,0).x, ref_v(1,0).x, pos_x);
                     auto vx2 = interpolate(ref_pos_x[i_pre], ref_pos_x[i_next],
